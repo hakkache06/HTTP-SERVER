@@ -6,7 +6,7 @@
 /*   By: hnaciri- <hnaciri-@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/08/16 16:36:13 by hnaciri-          #+#    #+#             */
-/*   Updated: 2022/09/13 17:13:17 by hnaciri-         ###   ########.fr       */
+/*   Updated: 2022/09/15 21:20:18 by hnaciri-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -61,6 +61,9 @@ struct client_info
 	server												serv;
 	std::vector<server>									servers;			
 	std::string											body;
+	std::string											file_name;
+	std::fstream										file;
+	std::map<std::string, std::string>					mime_types;
     struct client_info									*next;
 };
 

@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   main.cpp                                           :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: yhakkach <yhakkach@student.42.fr>          +#+  +:+       +#+        */
+/*   By: hnaciri- <hnaciri-@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/08/16 15:46:08 by hnaciri-          #+#    #+#             */
-/*   Updated: 2022/09/15 12:10:48 by yhakkach         ###   ########.fr       */
+/*   Updated: 2022/09/16 19:04:00 by hnaciri-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -135,6 +135,21 @@ std::string	get_file(int ac, char **av)
 	}
 	file.close();
 	return (all_file);
+}
+
+std::map<std::string, std::string>	get_mime_types()
+{
+	std::fstream						file;
+	std::string							line;
+	std::map<std::string, std::string>	map;
+
+	file.open("mime/mime_type.txt");
+	while(!file.eof())
+	{
+		std::getline (file, line);
+		map.insert(std::make_pair(line.substr(line.find_first_of(" ") + 1), line.substr(0, line.find_first_of(" "))));
+	}
+	return (map);
 }
 
 void	check_server_hosts(std::vector<server> servers, server serv)
@@ -311,24 +326,35 @@ void drop_client(struct client_info **client_list, struct client_info *client)
 	}
 }
 
-void send_error(struct client_info *client, int code, std::string path)
+void send_error(struct client_info *client, int code)
 {
-	FILE *fp = fopen(path.c_str(), "rb");
+	FILE											*fp;
+	std::string										path;
+	std::map<int, std::string>::iterator	_it;
+
+	_it = client->serv._error_page.find(code);
+	if (_it != client->serv._error_page.end())
+		path = _it->second;
+	else
+		path = "./error_pages/" + std::to_string(code) + ".html";
+	fp = fopen(path.c_str(), "rb");
 	if (!fp)
 	{
-		path = "/Users/hnaciri-/Desktop/web_server/error_pages/" + std::to_string(code) + ".html";
+		path = "./error_pages/404.html";
+		code = 404;
 		fp = fopen(path.c_str(), "rb");
 		if (!fp)
 		{
-			fp = fopen("/Users/hnaciri-/Desktop/web_server/error_pages/404.html", "rb");
-			code = 404;
+			path = "HTTP/1.1 400\r\nConnection: close\r\nContent-Length: 11\r\nContent-Type: text/html\r\n\r\nbad request";
+			send(client->socket, path.c_str(), path.length(), 0);
+			return ;
 		}
 	}
 	fseek(fp, 0L, SEEK_END);
     size_t cl = ftell(fp);
     rewind(fp);
 	char buffer[BSIZE];
-	std::string	s = "HTTP/1.1 " + std::to_string(code) + "\r\nConnection: close\r\nContent-Length: " + std::to_string((int)cl) + "\r\n\r\n";
+	std::string	s = "HTTP/1.1 " + std::to_string(code) + "\r\nConnection: close\r\nContent-Length: " + std::to_string((int)cl) + "\r\nContent-Type: text/html\r\n\r\n";
     send(client->socket, s.c_str(), s.length(), 0);
 	int r = fread(buffer, 1, BSIZE, fp);
     while (r)
@@ -336,8 +362,6 @@ void send_error(struct client_info *client, int code, std::string path)
         send(client->socket, buffer, r, 0);
         r = fread(buffer, 1, BSIZE, fp);
     }
-			printf("seg henyay\n");
-
 }
 
 const char *get_client_address(struct client_info *ci)
@@ -375,7 +399,7 @@ struct client_info *get_client(struct client_info **client_list, int s)
 void	parse_header(struct client_info **clienta, std::vector<server> servers)
 {
 	struct client_info	*client = *clienta;
-	std::string	first_line = client->header.substr(0, client->header.find_first_of('\n'));
+	std::string	first_line = client->header.substr(0, client->header.find_first_of('\n') - 1);
 	std::string	line, token, key;
 	std::vector<std::string> values;
 	std::map<std::string, std::vector<std::string> >	my_map;
@@ -384,7 +408,7 @@ void	parse_header(struct client_info **clienta, std::vector<server> servers)
 	client->header = client->header.substr(client->header.find_first_of('\n') + 1);
 	client->method = first_line.substr(0, first_line.find_first_of(' '));
 	line = client->header;
-
+	client->header = first_line;
 	while ((pos_1 = line.find("\r\n")) != std::string::npos)
 	{
 		token = line.substr(0, pos_1);
@@ -426,84 +450,200 @@ void	parse_header(struct client_info **clienta, std::vector<server> servers)
 	client->headers = my_map;
 }
 
-void	request_handler(struct client_info *client, std::vector<server> servers)
+std::string     get_time_string()
+{
+    time_t curr_time;
+	tm * curr_tm;
+	struct timeval tv;
+	char time_string[100];
+	std::string		_time;
+
+	time(&curr_time);
+	gettimeofday(&tv, NULL);
+	curr_tm = localtime(&curr_time);
+	strftime(time_string, 50, "%Y_%m_%d_%H_%M_%S_", curr_tm);
+	_time = std::string(time_string) + std::to_string(tv.tv_usec);
+    return (_time);
+}
+
+bool	check_request_errors(struct client_info *client)
+{
+	{
+		std::map<std::string, std::vector<std::string> >::iterator	_it = client->headers.find("Transfer-Encoding");
+		if (_it != client->headers.end())
+		{
+			if (*(_it->second.begin()) != "chunked")
+			{
+				send_error(client, 501);
+				return (true);
+			}
+		}
+	}
+	{
+		std::map<std::string, std::vector<std::string> >::iterator	_it = client->headers.find("Transfer-Encoding");
+		std::map<std::string, std::vector<std::string> >::iterator	__it = client->headers.find("Content-Length");
+		if (_it == client->headers.end() && __it == client->headers.end() && client->method == "POST")
+		{
+			send_error(client, 400);
+			return (true);
+		}
+	}
+	{
+		std::map<std::string, std::vector<std::string> >::iterator	_it = client->headers.find("Content-Length");
+		if ((_it == client->headers.end() || std::stoi(*(_it->second.begin())) > client->serv._limit_body_size) && client->method == "POST")
+		{
+			send_error(client, 413);
+			return (true);
+		}
+	}
+	return (false);
+}
+
+void	request_handler(struct client_info **client_list, struct client_info *client, std::vector<server> servers, fd_set *save_r, fd_set *save_w)
 {
 	size_t	p;
-	
+
 	p = client->body.find("\r\n\r\n");
 	if ((p != std::string::npos) && (client->read_all_header == false))
-	{
+	{	
 		p += 4;
 		client->read_all_header = true;
 		client->header = client->body.substr(0, p - 4);
 		client->body = client->body.substr(p);
 		parse_header(&client, servers);
+		if (check_request_errors(client))
+		{
+			delete_client(client_list, &client, save_r, save_w);
+			return ;
+		}
 		if (client->method != "POST")
+		{
 			client->read_all_body = true;
+			return ;
+		}
+		else
+		{
+			client->file_name = ".tmp/" + get_time_string();
+			client->file.open(client->file_name, std::ios_base::out);
+		}
 	}
-	if (client->read_all_header == true && client->method != "GET" && client->method != "DELETE")
+	if (client->read_all_header == true && client->method == "POST")
 	{
-		if (std::stoi(*(client->headers.find("Content-Length")->second.begin())) == (int)client->body.length())
+		client->file << client->body;
+		client->body.clear();
+		client->file.seekg(0, std::ios::end);
+		if (std::stoi(*(client->headers.find("Content-Length")->second.begin())) == client->file.tellp())
+		{
 			client->read_all_body = true;
+			client->file.close();
+		}
 	}
 }
 
-void	socket_handler(struct client_info **_client, std::vector<server> servers)
+void	socket_handler(struct client_info **client_list, struct client_info **_client, std::vector<server> servers, fd_set *save_r, fd_set *save_w)
 {
 	struct	client_info	*client = *_client;
-	std::string	request;
 
 	size_t r = recv(client->socket, client->request + client->received, BUFFER, 0);
-	request = std::string(client->request, r);
-	client->body += request;
-	request_handler(client, servers);
+	client->body += std::string(client->request, r);
+	std::cout << client->body << std::endl;
+	if (client->read_all_body == true)
+	{
+		client->body.clear();
+		return ;
+	}
+	request_handler(client_list, client, servers, save_r, save_w);
 }
 
 void	delete_client(struct client_info **client_list, struct client_info **ci, fd_set *save_r, fd_set *save_w)
 {
 	struct client_info	*client = *ci;
-
-	std::map<std::string, std::vector<std::string> >::iterator it = client->headers.find("Connection");
-	if (it == client->headers.end())
-	{
-		FD_CLR(client->socket, save_r);
-		FD_CLR(client->socket, save_w);
-		drop_client(client_list, client);
-		return ;
-	}
-	for(std::vector<std::string>::iterator _it = it->second.begin(); _it != it->second.end(); _it++)
-	{
-		if (*_it == "keep-alive")
-		{
-			client->body.clear();
-			client->header.clear();
-			client->headers.clear();
-			client->read_all_body = false;
-			client->read_all_header = false;
-			client->method.clear();
-			client->serv = server();
-			client->servers.clear();
-			return ;
-		}
-	}
 	FD_CLR(client->socket, save_r);
 	FD_CLR(client->socket, save_w);
 	drop_client(client_list, client);
 }
 
+location	get_location(server serv, std::string uri)
+{
+	std::vector<location>::iterator	it = serv._locations.begin();
+	int		match = 1;
+
+	if (serv._locations.size() == 1)
+		return (*it);
+	for (std::vector<location>::iterator _it = serv._locations.begin(); _it != serv._locations.end(); _it++)
+	{
+		size_t	i;
+		int	count = 0;
+		for (i = 0; i < _it->_prefix.length(); i++)
+		{
+			if (_it->_prefix[i] != uri[i])
+				break ;
+			if (_it->_prefix[i] == '/' || ((_it->_prefix[i + 1] == '\0') && (uri[i + 1 ] == '\0' || uri[i + 1] == '/')))
+				count++;
+		}
+		if (count > match)
+		{
+			match = count;
+			it = _it;
+		}
+	}
+	return (*it);
+}
+
+void	post_request(struct client_info *client)
+{
+	std::string	uri = client->header.substr(client->header.find_first_of(" ") + 1), extention;
+	std::string	protocol = client->header.substr(client->header.find_last_of(" ") + 1);
+	uri = uri.substr(0, uri.find_first_of(" "));
+	location	loc = get_location(client->serv, uri);
+
+	if (std::find(loc._allow_methods.begin(), loc._allow_methods.end(), "POST") == loc._allow_methods.end())
+	{
+		send_error(client, 405);
+		return ;
+	}
+	if (protocol != "HTTP/1.1")
+	{
+		send_error(client, 505);
+		return ;
+	}
+	extention = "";
+	std::map<std::string, std::vector<std::string> >::iterator	_it = client->headers.find("Content-Type");
+	if (_it != client->headers.end())
+	{
+		std::map<std::string, std::string>::iterator it = client->mime_types.find(*(_it->second.begin()));
+		if (it != client->mime_types.end())
+			extention = it->second;
+	}
+	if (!loc._upload_pass.empty())
+		protocol = loc._upload_pass + client->file_name.substr(4);
+	else
+	{
+		send_error(client, 400);
+		return ;
+	}
+	protocol += extention;
+	if (std::rename(client->file_name.c_str(), protocol.c_str()))
+		send_error(client, 400);
+	else
+		send_error(client, 201);
+}
+
 void	send_response(struct client_info **client_list, struct client_info **ci, fd_set *save_r, fd_set *save_w)
 {
 	struct client_info	*client = *ci;
-	(void)client_list;
-	send_error(client, 404, "/Users/yhakkach/Desktop/webserv/webs/public/index.html");
-	delete_client(client_list, ci, save_r, save_w);
-	// for (std::map<std::string, std::vector<std::string> >::iterator it = client->headers.begin(); it != client->headers.end(); it++)
-	// {
-	// 	std::cout << it->first << ": ";
-	// 	for(std::vector<std::string>::iterator _it = it->second.begin(); _it != it->second.end(); _it++)
-	// 		std::cout << *_it << ", ";
-	// 	std::cout << std::endl;
-	// }
+
+	if (client->read_all_body == false)
+		return ;
+	// if (client->method == "GET")
+	// 	get_request(client);
+	/*else */if (client->method == "POST")
+		post_request(client);
+	// else if (client->method == "DELETE")
+	// 	delete_request(client);
+	else
+		send_error(client, 405);
+	delete_client(client_list, &client, save_r, save_w);
 }
 
 int		ft_lst_size(struct client_info *lst)
@@ -513,7 +653,6 @@ int		ft_lst_size(struct client_info *lst)
 	while (lst != NULL)
 	{
 		total++;
-		std::cout << "|| " << lst->socket << " ||" << std::endl;
 		lst = lst->next;
 	}
 	return (total);
@@ -523,6 +662,7 @@ int	main(int ac, char **av)
 {
 	std::string															file = get_file(ac, av);
 	std::map<std::string, std::map<std::string, std::vector<server> > >	servers = get_serv(parse(file));
+	std::map<std::string, std::string>									mime_types = get_mime_types();
 	fd_set																reads, save_r, writes, save_w;
 	int max_server = 0;
 	bool			new_request;
@@ -537,6 +677,7 @@ int	main(int ac, char **av)
 			for (std::vector<server>::iterator j = i->second.begin(); j != i->second.end(); j++)
 				j->_socket.socket_listen = a;
 			FD_SET(a, &reads);
+			fcntl(a, F_SETFL, O_NONBLOCK);
 			if (a > max_server)
 				max_server = a;
 		}
@@ -549,45 +690,44 @@ int	main(int ac, char **av)
 		reads = save_r;
 		writes = save_w;
 		reads = wait_on_clients(&client_list, reads, max_server, &writes);
+		for (std::map<std::string, std::map<std::string, std::vector<server> > >::iterator it = servers.begin(); it != servers.end(); it++)
+		{
+			for (std::map<std::string, std::vector<server> >::iterator i = it->second.begin(); i != it->second.end(); i++)
+			{
+				if (FD_ISSET(i->second.begin()->_socket.socket_listen, &reads))
+				{
+					struct client_info *client = get_client(&client_list, -1);
+					client->socket = accept(i->second.begin()->_socket.socket_listen,(struct sockaddr*) &(client->address), &(client->address_length));
+					if (!client->socket)
+					{
+						printf("accept() failed.");
+						exit(1);
+					}
+					client->servers = i->second;
+					client->mime_types = mime_types;
+					FD_SET(client->socket, &save_r);
+					FD_SET(client->socket, &save_w);
+					fcntl(client->socket, F_SETFL, O_NONBLOCK);
+				}
+			}
+		}
 		struct client_info *ci = client_list;
-		std::cout << "LIST_SIZE : " << ft_lst_size(ci) << std::endl;
 		while(ci)
 		{
 			if (FD_ISSET(ci->socket, &reads))
 			{
-				socket_handler(&ci, ci->servers);
+				socket_handler(&client_list, &ci, ci->servers, &save_r, &save_w);
 				new_request = false;
+				break ;
 			}
 			else if (FD_ISSET(ci->socket, &writes))
 			{
 				send_response(&client_list, &ci, &save_r, &save_w);
 				new_request = false;
+				break ;
 			}
+			//sleep (1);
 			ci = ci->next;
-		}
-		
-		if (new_request == true)
-		{
-			for (std::map<std::string, std::map<std::string, std::vector<server> > >::iterator it = servers.begin(); it != servers.end(); it++)
-			{
-				for (std::map<std::string, std::vector<server> >::iterator i = it->second.begin(); i != it->second.end(); i++)
-				{
-					if (FD_ISSET(i->second.begin()->_socket.socket_listen, &reads))
-					{
-						struct client_info *client = get_client(&client_list, -1);
-						client->socket = accept(i->second.begin()->_socket.socket_listen,(struct sockaddr*) &(client->address), &(client->address_length)); //  accept()  server create a new socket for incoming tcp connection.
-						if (!client->socket)
-						{
-							printf("accept() failed.");
-							exit(1);
-						}
-						client->servers = i->second;
-						FD_SET(client->socket, &save_r);
-						FD_SET(client->socket, &save_w);
-						new_request = true;
-					}
-				}
-			}
 		}
 	}
 }

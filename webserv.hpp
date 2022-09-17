@@ -6,7 +6,7 @@
 /*   By: hnaciri- <hnaciri-@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/08/27 16:11:16 by hnaciri-          #+#    #+#             */
-/*   Updated: 2022/09/13 11:00:41 by hnaciri-         ###   ########.fr       */
+/*   Updated: 2022/09/16 19:00:10 by hnaciri-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -30,6 +30,14 @@
 # include <stdio.h>
 # include <string.h>
 # include <stdlib.h>
+# include <filesystem>
+#include <iostream>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <stdio.h>
+#include <sys/time.h>
+#include <time.h>
+#include <math.h>
 
 # define BUFFER 1024
 # define BSIZE 1024
@@ -53,5 +61,5 @@ void	    switch_cases_location(std::string &file, location &loc);
 std::string trim(const std::string &s);
 bool		check_server_end(std::string file);
 void    	skip(std::string &file, std::string str);
-
+void	    delete_client(struct client_info **client_list, struct client_info **ci, fd_set *save_r, fd_set *save_w);
 #endif

@@ -124,6 +124,12 @@ void	error_no_root()
 	exit (1);
 }
 
+void	error_upload_cgi()
+{
+	std::cout << "Error" << std::endl << "location must just one between cgi and upload_pass" << std::endl;
+	exit (1);
+}
+
 void	get_port(std::string &line, server &serv)
 {
 	std::string::iterator	it = line.begin();
@@ -414,6 +420,8 @@ location	get_location(std::string &file, std::string &line)
 	skip(file, "}");
 	if (loc._root.empty())
 		error_no_root();
+	if ((loc._upload_pass.empty() && loc._cgi.empty()) || ((!loc._upload_pass.empty()) && (!loc._cgi.empty())))
+		error_upload_cgi();
 	return (loc);
 }
 
